@@ -3,9 +3,18 @@
 Agent harness for **Google — Agent Harness on Physical-Engineering's Last
 Exam** (Kaggle, $400.000). Entry: `cryptoboy-ple`. License: Apache-2.0.
 
-> Status 25 Nov 2026: **kerangka v0.1** — arsitektur 4 tahap + smoke test
-> lolos. Belum ada dev-set run (`artifacts/` masih kosong, akan diisi
-> `eval/run.py`). Target model di `submission.yaml` masih placeholder.
+> Status 25 Nov 2026: **kerangka v0.1 + smoke test lokal lolos.** Baseline
+> dev-set BELUM bisa jalan — 2 blocker: (1) kit resmi tidak boleh dieksekusi
+> sampai Yudhi menyetujui (execution-risk flag); (2) dataset HF dev-set
+> gated, butuh akun HF + akses + `HF_TOKEN`. Yang sudah terbukti: `uv`
+> terpasang, kit ter-clone, `pytest` 7 passed, model gratis 100milionseek
+> `deepseek-v4.1-flash-free` jalan dengan tools + `reasoning_effort=max`,
+> runner lokal `eval/run_local.py` menjalankan harness end-to-end pada tugas
+> sintetik (memo benar, total USD 7402.00, 485 dtk, 81.680 in / 11.547 out
+> token) dan menemukan 1 bug final_message yang sudah diperbaiki. Docker di
+> VM ini degraded (tanpa bridge/NAT, pull image gagal) — run resmi
+> kemungkinan butuh mesin lain. Detail: `docs/BASELINE-WEEK1.md`. Target
+> model di `submission.yaml` masih placeholder.
 
 ## Arsitektur: planner → worker → calc-verifier → verifier
 

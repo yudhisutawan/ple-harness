@@ -77,6 +77,19 @@ CONTEXT_FULL = re.compile(
     re.I,
 )
 
+# The free DeepSeek endpoint sometimes renders its native tool-call format
+# as plain text instead of an OpenAI function call.
+DSML_MARK = "｜DSML｜"
+
+ISSUE_LINE = re.compile(r"(?m)^\s*(?:\d+[.)]|[-*])\s+\S")
+
+
+def _has_numbered_issues(text: str) -> bool:
+    """True when a verifier verdict lists issues the way its prompt asks
+    (a numbered/bulleted list). A rambling verdict with no list is not
+    actionable and must not trigger a fix round."""
+    return bool(ISSUE_LINE.search(text or ""))
+
 # --- Prompts ----------------------------------------------------------------
 
 PLANNER = """You are the PLANNER for an engineering task. You can read files and run
@@ -381,6 +394,21 @@ async def agent_loop(session, messages, tools, wrap_up_left_sec, client=None,
             session.final_message = text
         turn = message.model_dump(exclude_none=True)
         if wrap_up or not message.tool_calls:
+            if (not wrap_up and DSML_MARK in text
+                    and nudges < MAX_NUDGES):
+                # The model wrote a tool call as plain text in its native
+                # format; it cannot run. Nudge it back to real tool calls.
+                nudges += 1
+                head = ""
+                messages.append(turn)
+                messages.append({
+                    "role": "user",
+                    "content": ("That tool call was written as plain text "
+                                "and cannot run. Use only the function tools "
+                                "provided (bash, read_file, write_file) as "
+                                "proper tool calls, and no other format."),
+                })
+                continue
             if wrap_up or (message.content and not cut) or nudges == MAX_NUDGES:
                 return session.final_message
             nudges, head = nudges + 1, text
@@ -500,7 +528,15 @@ async def solve(session: taskbridge.Session, client=None) -> str:
         except Exception as exc:
             await session.log(f"verifier failed ({exc}); keeping worker output")
             break
-        if verdict.strip().upper().startswith("PASS"):
+        if not verdict or not verdict.strip() \
+                or verdict.strip().upper().startswith("PASS"):
+            # Empty verdict = no gaps named (same rule as the official
+            # plan-verify sample). A garbled/non-actionable verdict must not
+            # trigger a fix round with garbage issues.
+            break
+        if not _has_numbered_issues(verdict):
+            await session.log(
+                "verifier verdict named no numbered issues; treating as PASS")
             break
         if round_no >= MAX_FIX_ROUNDS:
             break
@@ -509,10 +545,14 @@ async def solve(session: taskbridge.Session, client=None) -> str:
             summary = await agent_loop(
                 session,
                 [{"role": "system",
-                  "content": "You are the WORKER engineer. " + FIX.format(
-                      issues=issues)},
+                  "content": ("You are the WORKER engineer working in the "
+                              "task container (workdir: "
+                              f"{workdir}). "
+                              + FIX.format(issues=issues))},
                  {"role": "user",
-                  "content": "Fix the issues above in the deliverables."}],
+                  "content": ("Task instruction:\n" + session.instruction +
+                              "\n\nFix the issues above in the "
+                              "deliverables.")}],
                 WRITE_TOOLS,
                 wrap_up_left_sec=WRAP_UP_SEC,
                 client=client, log_prefix=f"fix{round_no + 1}: ",
