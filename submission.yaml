@@ -1,0 +1,20 @@
+# Cryptoboy PLE harness — submission.yaml
+# Entry name, model, and the install / serve commands the evaluator runs.
+# See docs/RULES-NOTES.md for what each field means.
+#
+# model_api is a PLACEHOLDER target: gemini-3.8-flash (cheap, Pareto-friendly).
+# The final target is decided in week 4-5 after cross-model dev-set tests
+# (rubric criterion 3) and committed here before the final submission.
+# Local dev runs use any model (Claude via NaraRouter, Hermes via 9Router,
+# open-weight local) — see README.md. Switching model_api here after
+# generating artifacts/ on a local model does NOT disqualify the entry.
+
+name: cryptoboy-ple
+model_api: google-cloud/gemini-3.8-flash
+install: >-
+  uv venv --python 3.12 /opt/harness/venv
+  && uv pip install --python /opt/harness/venv/bin/python -r {src}/requirements.txt
+serve: /opt/harness/venv/bin/python {src}/serve.py
+env:
+  LOG_LEVEL: "info"
+  MAX_OUTPUT_TOKENS: "32000"
