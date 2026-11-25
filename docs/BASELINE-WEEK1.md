@@ -1,14 +1,14 @@
 # Baseline minggu 1 — PLE (25 Nov 2026)
 
-Status: **setup selesai, baseline dev-set BELUM bisa jalan — 2 blocker keras**
-(lihat bawah). Yang jalan malam ini: smoke test sintetik lokal.
+Status: **setup selesai, baseline dev-set BELUM bisa jalan — blocker B2 (HF gated) + Docker VM tidak bisa pull image; VPS hermes bukan mesin run yang layak**
+(lihat §3 + §6). Yang jalan malam ini: smoke test sintetik lokal + `kit validate` lolos.
 
 ## 1. Yang sudah diverifikasi malam ini
 
 | Item | Hasil |
 |---|---|
 | `uv` | Terpasang 0.13.10 (`~/.local/bin/uv`) |
-| Docker | CLI 29.1.3 terpasang; daemon jalan tapi **degraded**: `--iptables=false --bridge=none` (bounding set VM tidak punya `CAP_NET_ADMIN`, `iptables` ditolak meski uid=0). Hanya network `host`/`none` yang ada — bridge/NAT tidak bisa dibuat. Pull image gagal: TLS handshake timeout ke `registry-1.docker.io` (egress proxy). Satu aksi terkait Docker sempat minta persetujuan yang kedaluwarsa tanpa jawaban — JANGAN diulang tanpa Yudhi yang minta. Dampak: `kit check` / `eval/run.py` resmi hampir pasti tidak bisa jalan di VM ini; butuh mesin dengan Docker penuh (kandidat: VPS `hermes` — perlu dicek) atau kapabilitas jaringan. |
+| Docker | CLI 29.1.3 terpasang; daemon jalan (4 CPU / 7,75 GB) tapi **tidak bisa pull image**: `docker run hello-world` gagal — `registry-1.docker.io` tidak terjangkau (context deadline exceeded, 60 dtk; dicoba ulang 25 Nov malam). Dampak: `kit check` / `eval/run.py` resmi TIDAK BISA jalan di VM ini walau `HF_TOKEN` sudah ada. VPS `hermes` juga bukan alternatif (lihat B3): ARM 2 CPU / 11 GB, Docker tidak terpasang. |
 | Sumber daya VM | Disk 144 GB bebas (cukup untuk image Docker 10 + 17 GB). CPU `nproc` 4, RAM total ~8 GB (hanya 376 MB available saat dicek) — jauh di bawah slot kit (6 CPU / 16,25 GB per tugas); run resmi di VM ini pun akan sangat pelan/berisiko OOM. |
 | Kit | Clone bersih `google-research/ple` → `~/workspace/ple-kit/` |
 | Repo harness | `pytest tests/` — **7 passed** (sesudah fix, lihat §2) |
@@ -102,20 +102,13 @@ dicatat sebagai deviasi baseline).
 
 ## 3. Blocker keras
 
-### B1. Kit tidak boleh dieksekusi — butuh persetujuan Yudhi
-Clone `google-research/ple` memicu execution-risk check pada hasil tool.
-Aturan: JANGAN menjalankan kode kit (`kit validate`, `kit check`,
-`eval/run.py`, `kit artifacts`, `kit up`) sampai Yudhi menyetujui secara
-eksplisit bahwa kode kit boleh dijalankan. Dampak: tidak ada `kit validate`
-malam ini, tidak ada skor resmi dev-set, tidak ada `artifacts/` resmi.
-Yang TIDAK kena blokir: membaca file kit (sudah dilakukan — protocol,
-local-models, artifacts, eval/README), menjalankan harness sendiri
-(`serve.py`/`harness.py` — kode repo sendiri, sudah dibaca penuh), dan
-runner lokal `eval/run_local.py`.
-
-**Pertanyaan untuk Yudhi:** "Bolehkah Cryptoboy menjalankan kode kit resmi
-kompetisi PLE (repo google-research/ple — `kit validate` / `eval/run.py`)
-di VM ini?"
+### B1. Kit tidak boleh dieksekusi — ✅ SELESAI 25 Nov 22:09 WITA
+Yudhi memberi go-ahead eksplisit ("Boleh, jalankan kit resmi PLE").
+Hasil: `kit validate` pada entry asli **LOLOS** ("ok: cryptoboy-ple,
+google-cloud/gemini-3.8-flash; egress none"), dan pada salinan lokal
+`ple-harness-local` (model_api openai-compatible) juga **LOLOS**.
+Harbor 0.20.0 terpasang (`uv tool install harbor==0.20.0 --with websockets`).
+Go-ahead ini hanya berlaku untuk kode kit resmi google-research/ple.
 
 ### B2. Dataset dev-set gated — butuh akun Hugging Face + akses
 `eval/run.py` mengunduh tugas dari dataset HF dengan `HF_TOKEN`. Akses
@@ -128,6 +121,32 @@ lalu token read dibuat. Yang dibutuhkan:
    (jangan pernah tulis token di chat; simpan mode 600 seperti key lain).
 Tanpa ini, TIDAK ADA tugas dev yang bisa dijalankan — resmi maupun lokal.
 
+**Terkonfirmasi 25 Nov 22:xx WITA (probe `eval/run.py`, 1 tugas):** download
+gagal dengan `GatedRepoError` — "set HF_TOKEN to a token that can read it
+(while the dataset is gated, request access on that page, signed in to
+Hugging Face, and use a token of the account that was granted it)".
+Dataset commit `9ca4de831267` (metadata terbaca anonim, `"gated":"auto"`).
+Diagnosis tambahan: percobaan pertama gagal dengan `InvalidURL: Invalid
+port: ':1]'` — BUKAN gate, melainkan entri IPv6 berkurung (`[::1]`,
+`[fd8b:...]`) di `NO_PROXY` yang merusak parsing URL di stack HTTP Python
+(huggingface_hub). Workaround: jalankan dengan `NO_PROXY=localhost,127.0.0.1
+no_proxy=localhost,127.0.0.1` — setelah itu metadata HF terbaca dan
+download mencapai gate yang sebenarnya.
+
+### B3. Docker VM tidak bisa pull image; VPS hermes bukan mesin run
+- **VM ini:** daemon jalan (4 CPU / 7,75 GB), tapi `docker run hello-world`
+  gagal — `registry-1.docker.io` tidak terjangkau (context deadline
+  exceeded, 60 dtk). Jadi `kit check` / `eval/run.py` TIDAK BISA jalan di
+  sini walau `HF_TOKEN` sudah ada — keduanya butuh pull/build image.
+- **VPS `hermes` (dicek 25 Nov malam, read-only via SSH):** `aarch64`
+  (ARM), 2 CPU, RAM 11 GB (10 available), disk 38 GB bebas, dan **Docker
+  tidak terpasang** (`docker: command not found`). Kit butuh image
+  `linux/amd64` + slot 6 CPU / 16,25 GB per tugas. Kesimpulan: VPS **tidak
+  layak** jadi mesin run (butuh install Docker + emulasi amd64 di ARM 2 CPU
+  — sangat lambat, belum tentu didukung Harbor/kit). Opsi mesin run yang
+  tersisa: VM/laptop lain milik Yudhi dengan Docker penuh + 6+ CPU / 16+ GB
+  RAM, atau cloud VM (butuh biaya — tanya Yudhi dulu).
+
 ## 4. Rencana baseline 3–5 tugas (setelah B1 + B2 beres)
 
 Urutan (campur domain + jenis grading, mulai dari yang paling terukur):
@@ -137,18 +156,49 @@ Urutan (campur domain + jenis grading, mulai dari yang paling terukur):
 4. `fire-test-validation-memo` (Mechanical, rubric, `final_message`) — memo.
 5. `data-center-site-model` (Civil, checks, `model.ifc`) — tersulit, terakhir.
 
-Perintah resmi (setelah B1 disetujui + `HF_TOKEN` ada):
+Perintah resmi (setelah B1 disetujui + `HF_TOKEN` ada + mesin yang Docker-nya
+bisa pull image — lihat §6; entry yang dijalankan adalah salinan lokal
+`../ple-harness-local`, BUKAN repo asli, karena `--model-base-url` ditolak
+untuk entry `google-cloud`):
 ```bash
 cd ~/workspace/ple-kit
-uv run python eval/run.py ../kaggle-ple-harness --env-file local.env \
-  --tasks data-hall-mep-routing,wind-diaphragm-shear \
-  --model-base-url https://100milionseek.top/v1
+NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 \
+  uv run python eval/run.py ../ple-harness-local --env-file local.env \
+  --tasks data-hall-mep-routing,wind-diaphragm-shear
 # + MODEL_API_KEY (100ms) di local.env; judge lokal = model sendiri
 ```
 Catatan: `eval/run.py` butuh Docker + Harbor 0.20.0 (`uv tool install
-harbor==0.20.0 --with websockets`) + ~10 GB disk untuk image.
+harbor==0.20.0 --with websockets`, sudah terpasang) + ~10 GB disk untuk image.
 
 ## 5. Taksonomi kegagalan pertama
 
 _(diisi setelah run dev-set pertama; smoke test sintetik bukan sumber
 taksonomi — terlalu mudah)_
+
+## 6. Validasi kit + probe eval/run.py (25 Nov malam, setelah go-ahead Yudhi)
+
+- `kit validate` entry asli: **LOLOS** (`cryptoboy-ple`,
+  `google-cloud/gemini-3.8-flash`, egress none). `kit validate` salinan
+  lokal (`ple-harness-local`, `openai-compatible/deepseek-v4.1-flash-free`,
+  `model_base_url: https://100milionseek.top/v1`): **LOLOS** (egress
+  `100milionseek.top:443`).
+- **Catatan model lokal:** `submission.yaml` asli (`google-cloud/...`)
+  MENOLAK `--model-base-url` ("a google-cloud model is reached through
+  MODEL_PROXY_URL..."). Karena itu baseline lokal memakai salinan terpisah
+  `~/workspace/ple-harness-local/` (commit `6de91cf`, hanya ubah
+  `model_api`/`model_base_url`, repo asli TIDAK diubah). Key 100ms di
+  `~/workspace/ple-kit/local.env` (mode 600, `MODEL_API_KEY`, tidak pernah
+  di-print); judge lokal = model sendiri (otomatis untuk entry
+  openai-compatible).
+- **Probe `eval/run.py` (1 tugas, `data-hall-mep-routing`):** gagal di
+  download dataset — `GatedRepoError`, HF_TOKEN belum ada (lihat B2).
+  Perintah yang dipakai (setelah B2 beres, dan di mesin yang Docker-nya
+  bisa pull image):
+  ```bash
+  cd ~/workspace/ple-kit
+  NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 \
+    uv run python eval/run.py ../ple-harness-local --env-file local.env \
+    --tasks data-hall-mep-routing,wind-diaphragm-shear,lv-cable-sizing,fire-test-validation-memo,data-center-site-model
+  ```
+- **Skor baseline resmi: BELUM ADA** (0/5 tugas terukur — blokir B2 + Docker).
+  Taksonomi kegagalan tetap kosong sampai run pertama berhasil.
